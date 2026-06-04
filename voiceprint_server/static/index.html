@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>StreamScore - 声纹注册</title>
+<script src="https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js" type="module"></script>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body { font-family: -apple-system, BlinkMacSystemFont, sans-serif; max-width: 800px; margin: 0 auto; padding: 24px; background: #0f0f0f; color: #e0e0e0; }
+  h1 { font-size: 20px; margin-bottom: 8px; }
+  .subtitle { color: #888; margin-bottom: 24px; font-size: 14px; }
+  .step { display: none; }
+  .step.active { display: block; }
+  .card { background: #1a1a1a; border: 1px solid #333; border-radius: 8px; padding: 16px; margin-bottom: 12px; }
+  .card.selected { border-color: #4fc3f7; background: #1a2a33; }
+  .card-header { display: flex; justify-content: space-between; align-items: center; }
+  .card-title { font-size: 16px; font-weight: 600; }
+  .card-meta { color: #888; font-size: 13px; }
+  .waveform { width: 100%; height: 64px; margin: 8px 0; }
+  button { padding: 10px 20px; border: none; border-radius: 6px; font-size: 14px; cursor: pointer; }
+  .btn-primary { background: #4fc3f7; color: #000; }
+  .btn-primary:disabled { background: #444; color: #888; cursor: not-allowed; }
+  .btn-play { background: #333; color: #e0e0e0; padding: 6px 12px; font-size: 13px; }
+  .status { padding: 12px; background: #1a1a2e; border-radius: 6px; margin-bottom: 16px; }
+  .spinner { display: inline-block; width: 16px; height: 16px; border: 2px solid #333; border-top-color: #4fc3f7; border-radius: 50%; animation: spin 1s linear infinite; margin-right: 8px; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .error { color: #ef5350; background: #2a1a1a; padding: 12px; border-radius: 6px; }
+</style>
+</head>
+<body>
+
+<h1>StreamScore 声纹注册</h1>
+<p class="subtitle">确认主播身份以建立声纹模板</p>
+
+<!-- Step 0: 输入 -->
+<div id="step-input" class="step active">
+  <div class="card">
+    <label>Room ID</label>
+    <input id="room-id" type="text" placeholder="例如 12345" style="width:100%;padding:8px;margin:8px 0;background:#222;border:1px solid #444;color:#e0e0e0;border-radius:4px;">
+    <label>Audio Path（可选，默认 data/recordings/{roomId}/latest/audio_full.wav）</label>
+    <input id="audio-path" type="text" placeholder="留空则使用默认路径" style="width:100%;padding:8px;margin:8px 0;background:#222;border:1px solid #444;color:#e0e0e0;border-radius:4px;">
+    <button class="btn-primary" onclick="startEnroll()">开始注册</button>
+  </div>
+</div>
+
+<!-- Step 1: 处理中 -->
+<div id="step-processing" class="step">
+  <div class="status">
+    <span class="spinner"></span> 正在处理音频…（预计 5-15 分钟）
+    <p style="margin-top:8px;color:#888;font-size:13px;">运行中：Demucs 人声分离 → VAD → 说话人分割</p>
+  </div>
+</div>
+
+<!-- Step 2: 选择 -->
+<div id="step-select" class="step">
+  <p style="margin-bottom:16px;">检测到以下说话人，请 <strong>点击播放样本并选择主播</strong>：</p>
+  <div id="candidates"></div>
+  <button id="btn-confirm" class="btn-primary" disabled onclick="confirmSpeaker()">确认主播</button>
+</div>
+
+<!-- Step 3: 完成 -->
+<div id="step-done" class="step">
+  <div class="status" style="background:#1a2a1a;">
+    &#10003; 声纹已保存。后续运行 pipeline 时将自动识别该主播。
+  </div>
+</div>
+
+<!-- Step Error -->
+<div id="step-error" class="step">
+  <div class="error" id="error-msg"></div>
+  <button class="btn-primary" style="margin-top:12px;" onclick="reset()">重试</button>
+</div>
+
+<script type="module">
+import WaveSurfer from 'https://unpkg.com/wavesurfer.js@7/dist/wavesurfer.esm.js';
+
+let selectedCandidate = null;
+let roomId = null;
+
+window.startEnroll = async function() {
+  roomId = document.getElementById('room-id').value.trim();
+  if (!roomId) { alert('请输入 Room ID'); return; }
+
+  showStep('step-processing');
+
+  try {
+    const audioPath = document.getElementById('audio-path').value.trim() || null;
+    const resp = await fetch(`/api/v1/enroll/${roomId}`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({audio_path: audioPath}),
+    });
+    if (!resp.ok) throw new Error((await resp.json()).detail || 'Request failed');
+    pollStatus();
+  } catch (err) {
+    document.getElementById('error-msg').textContent = '启动失败: ' + err.message;
+    showStep('step-error');
+  }
+};
+
+async function pollStatus() {
+  const maxAttempts = 600; // 约 30 分钟 (3s 间隔)
+  for (let i = 0; i < maxAttempts; i++) {
+    await sleep(3000);
+    try {
+      const resp = await fetch(`/api/v1/enroll/${roomId}/status`);
+      const data = await resp.json();
+      if (data.status === 'ready') { loadCandidates(); return; }
+      if (data.status === 'error') {
+        document.getElementById('error-msg').textContent = '处理失败: ' + (data.error || 'Unknown');
+        showStep('step-error');
+        return;
+      }
+    } catch (e) { /* continue polling */ }
+  }
+  document.getElementById('error-msg').textContent = '处理超时（超过 30 分钟）';
+  showStep('step-error');
+}
+
+async function loadCandidates() {
+  const resp = await fetch(`/api/v1/enroll/${roomId}/candidates`);
+  const data = await resp.json();
+  const container = document.getElementById('candidates');
+  container.innerHTML = '';
+
+  data.candidates.forEach((c, idx) => {
+    const card = document.createElement('div');
+    card.className = 'card';
+    card.id = `candidate-${idx}`;
+    card.innerHTML = `
+      <div class="card-header">
+        <span class="card-title">说话人 ${idx + 1}</span>
+        <span class="card-meta">${c.duration}s</span>
+      </div>
+      <div class="waveform" id="wave-${idx}"></div>
+      <button class="btn-play" id="play-${idx}">播放</button>
+    `;
+    card.onclick = () => selectCandidate(idx);
+    container.appendChild(card);
+
+    // WaveSurfer 实例
+    const ws = WaveSurfer.create({
+      container: `#wave-${idx}`,
+      waveColor: '#555',
+      progressColor: '#4fc3f7',
+      cursorColor: '#4fc3f7',
+      height: 64,
+      barWidth: 2,
+      normalize: true,
+      url: c.sample_url,
+    });
+
+    // 播放按钮
+    let playing = false;
+    document.getElementById(`play-${idx}`).onclick = (e) => {
+      e.stopPropagation();
+      if (playing) { ws.pause(); playing = false; e.target.textContent = '播放'; }
+      else { ws.play(); playing = true; e.target.textContent = '暂停'; }
+      ws.on('finish', () => { playing = false; e.target.textContent = '播放'; });
+    };
+  });
+
+  showStep('step-select');
+}
+
+window.selectCandidate = function(idx) {
+  selectedCandidate = idx;
+  document.querySelectorAll('.card').forEach(c => c.classList.remove('selected'));
+  document.getElementById(`candidate-${idx}`).classList.add('selected');
+  document.getElementById('btn-confirm').disabled = false;
+};
+
+window.confirmSpeaker = async function() {
+  if (selectedCandidate === null) return;
+  try {
+    const resp = await fetch(`/api/v1/enroll/${roomId}/confirm`, {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({speaker_id: selectedCandidate}),
+    });
+    if (!resp.ok) throw new Error((await resp.json()).detail || 'Confirm failed');
+    showStep('step-done');
+  } catch (err) {
+    document.getElementById('error-msg').textContent = '保存失败: ' + err.message;
+    showStep('step-error');
+  }
+};
+
+window.reset = function() { showStep('step-input'); selectedCandidate = null; };
+
+function showStep(id) {
+  document.querySelectorAll('.step').forEach(s => s.classList.remove('active'));
+  document.getElementById(id).classList.add('active');
+}
+
+function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
+</script>
+</body>
+</html>

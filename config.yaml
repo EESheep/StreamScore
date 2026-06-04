@@ -1,0 +1,73 @@
+# ==================== 输入 ====================
+input:
+  flv_template: "/data/recordings/{room_id}/{date}/raw.flv"
+  danmaku_template: "/data/recordings/{room_id}/{date}/danmaku.xml"
+  output_dir: "/data/processed/{room_id}/{date}"
+
+# ==================== 声纹注册 ====================
+voiceprint:
+  register_dir: "./data/voiceprints/"
+
+# ==================== HuggingFace ====================
+hf_token: "hf_your_token"
+
+# ==================== DeepSeek API ====================
+deepseek:
+  api_key: "sk-your-api-key"
+  model: "deepseek-v4-flash"
+  base_url: "https://api.deepseek.com"
+
+# ==================== GPU ====================
+gpu:
+  device: "cuda:0"
+  max_split_size_mb: 128
+
+# ==================== 音频处理 ====================
+audio:
+  sample_rate: 16000
+  chunk_duration: 600
+  chunk_overlap: 30
+  crossfade_duration: 5
+
+# ==================== 音频增强 ====================
+enhance:
+  vad_threshold: 0.5
+  merge_max_gap: 3.0
+  voiceprint_threshold: 0.65
+
+# ==================== ASR ====================
+asr:
+  model_size: "large-v3"
+  compute_type: "int8"
+
+# ==================== 弹幕 ====================
+danmaku:
+  buffer_seconds: 5
+  sample_top: 10
+
+# ==================== LLM 分析 ====================
+llm:
+  score_threshold: 7.0
+
+# ==================== 评分权重 ====================
+scoring_weights:
+  info: 0.3
+  fun: 0.25
+  interaction: 0.25
+  emotion: 0.2
+
+# ==================== 剪辑 ====================
+clip:
+  min_duration: 3
+  max_duration: 600
+  crf: 23
+  audio_bitrate: "128k"
+
+# ==================== 按主播覆写（可选） ====================
+room_overrides:
+  "example_room_id":
+    scoring_weights:
+      info: 0.4
+      fun: 0.15
+      interaction: 0.25
+      emotion: 0.2

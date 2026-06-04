@@ -1,0 +1,14 @@
+torch>=2.0.1
+torchaudio
+demucs
+pyannote.audio
+speechbrain
+faster-whisper
+pyyaml
+pydub
+soundfile
+requests
+tqdm
+fastapi
+uvicorn[standard]
+jinja2
