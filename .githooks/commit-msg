@@ -1,0 +1,74 @@
+#!/usr/bin/env bash
+# ============================================================
+# StreamScore Commit-Msg Hook — 提交信息格式校验
+# ============================================================
+set -euo pipefail
+
+COMMIT_MSG_FILE="$1"
+RED='\033[0;31m'
+NC='\033[0m'
+
+SUBJECT=$(head -n 1 "$COMMIT_MSG_FILE")
+BODY_START=$(sed -n '2p' "$COMMIT_MSG_FILE")
+BODY_LINE3=$(sed -n '3p' "$COMMIT_MSG_FILE")
+
+ERRORS=()
+
+# --- 规则 1: 主题行不能为空 ---
+if [ -z "$SUBJECT" ]; then
+    ERRORS+=("Subject line must not be empty")
+fi
+
+# --- 规则 2: 主题行长度 ≤ 72 字符 ---
+if [ ${#SUBJECT} -gt 72 ]; then
+    ERRORS+=("Subject line too long: ${#SUBJECT} chars (max 72)")
+fi
+
+# --- 规则 3: 主题行不以句号结尾 ---
+if echo "$SUBJECT" | grep -qE '\.$'; then
+    ERRORS+=("Subject line must not end with a period")
+fi
+
+# --- 规则 4: 主题和正文之间必须有空行（如果存在正文）---
+if [ -n "$BODY_START" ] && [ "$BODY_START" != "" ]; then
+    ERRORS+=("Second line must be blank (separate subject from body)")
+fi
+
+# --- 规则 5: 禁止 WIP / TEMP 提交 ---
+if echo "$SUBJECT" | grep -qiE '^(WIP|TEMP|tmp|test commit|debug)'; then
+    ERRORS+=("Temporary/WIP commits are not allowed")
+fi
+
+# --- 规则 6: 主题行开头大写 ---
+if [ -n "$SUBJECT" ]; then
+    first_char="${SUBJECT:0:1}"
+    if echo "$first_char" | grep -qE '[a-z]'; then
+        ERRORS+=("Subject line must start with a capital letter: '$SUBJECT'")
+    fi
+fi
+
+# --- 报告 ---
+if [ ${#ERRORS[@]} -gt 0 ]; then
+    echo ""
+    printf "${RED}============================================${NC}\n"
+    printf "${RED}  COMMIT REJECTED: message format violation${NC}\n"
+    printf "${RED}============================================${NC}\n"
+    echo ""
+    for err in "${ERRORS[@]}"; do
+        printf "  - %s\n" "$err"
+    done
+    echo ""
+    echo "Expected format:"
+    echo "  <Capitalized short summary, max 72 chars>"
+    echo ""
+    echo "  <Optional body, separated by blank line>"
+    echo ""
+    echo "Examples:"
+    echo "  Add pre-commit hook for API key leak detection"
+    echo "  Fix chunk offset calculation in audio_enhance"
+    echo "  Refactor voiceprint matching to use global clustering"
+    echo ""
+    exit 1
+fi
+
+exit 0
