@@ -2,7 +2,18 @@
 import json
 import logging
 import os
+import shutil
 import torch
+
+# --- Windows 兼容：speechbrain fetch() 尝试 symlink，Windows 无权限则回退为 copy ---
+import pathlib as _pl
+_pl_symlink_original = _pl.Path.symlink_to
+def _pl_symlink_patched(self, target, target_is_directory=False):
+    try:
+        _pl_symlink_original(self, target, target_is_directory)
+    except OSError:
+        shutil.copy2(str(target), str(self))
+_pl.Path.symlink_to = _pl_symlink_patched
 
 from modules.utils import write_jsonl
 from modules.audio_enhance import chunking, demucs, vad, diarization, voiceprint, clustering, merge_gaps
@@ -44,9 +55,11 @@ def enhance_audio(config, wav_path, output_dir):
     elif os.path.exists(register_audio_path):
         register_emb = voiceprint.load_register_embedding(spkrec, register_audio_path)
     else:
-        raise RuntimeError(
-            f"No voiceprint found for room {room_id}. "
-            f"Run voiceprint_server first or place register.wav in {register_dir}{room_id}/"
+        register_emb = None
+        logger.warning(
+            "No voiceprint found for room %s. "
+            "Will select speaker with most speech time as host. "
+            "Run voiceprint_server first to register host voiceprint.", room_id
         )
 
     # ==================== 2. 创建 VAD + Pyannote 模型 ====================
@@ -116,11 +129,32 @@ def enhance_audio(config, wav_path, output_dir):
     for gid, cluster_data in global_clusters.items():
         cluster_embeddings[gid] = clustering._compute_center(cluster_data["embeddings"])
 
-    host_label, _ = voiceprint.match_host_label(spkrec, cluster_embeddings, register_emb, vp_threshold)
+    if register_emb is not None:
+        host_label, _ = voiceprint.match_host_label(spkrec, cluster_embeddings, register_emb, vp_threshold)
+    else:
+        host_label = None
+
     if host_label is None:
         if len(global_clusters) == 1:
             host_label = list(global_clusters.keys())[0]
             logger.warning("Only one speaker found, assuming it's the host.")
+        elif register_emb is None:
+            # 无声纹注册时，选总说话时长最长的 speaker 作为主播
+            total_dur = {}
+            for gid, cluster_data in global_clusters.items():
+                dur = 0.0
+                for m in cluster_data["members"]:
+                    cid = m["chunk_id"]
+                    spk = m["speaker_label"]
+                    if cid in all_diarization:
+                        diar, _ = all_diarization[cid]
+                        for turn, _, s in diar.itertracks(yield_label=True):
+                            if s == spk:
+                                dur += turn.end - turn.start
+                total_dur[gid] = dur
+            host_label = max(total_dur, key=total_dur.get)
+            logger.info("No voiceprint: selected speaker %s (total %.1fs) as host from %d candidates",
+                        host_label, total_dur[host_label], len(global_clusters))
         else:
             raise RuntimeError(
                 f"No speaker matched host voiceprint. "
@@ -196,8 +230,9 @@ def _load_vad(device):
         repo_or_dir="snakers4/silero-vad",
         model="silero_vad",
     )
-    if device.startswith("cuda"):
-        model = model.to(device)
+    # Silero VAD TorchScript 模型在 CUDA 上有 STFT buffer 设备不匹配问题，
+    # 保持 CPU 推理，输入调用前手动将 wav 移到 CPU
+    _ = device  # unused
     return model, utils
 
 
@@ -208,7 +243,7 @@ def _load_pyannote(hf_token, device):
         use_auth_token=hf_token,
     )
     if device.startswith("cuda"):
-        pipeline = pipeline.to(device)
+        pipeline = pipeline.to(torch.device(device))
     return pipeline
 
 

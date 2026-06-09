@@ -10,6 +10,8 @@ def detect_speech(vad_model, vad_utils, audio_path, threshold=0.5):
     get_speech_timestamps = vad_utils[0]
 
     wav = read_audio(audio_path, sampling_rate=16000)
+    # Silero VAD TorchScript 在 CUDA 上有 STFT buffer 不一致问题，确保输入在 CPU
+    wav = wav.cpu()
     timestamps = get_speech_timestamps(
         wav, vad_model,
         return_seconds=True,

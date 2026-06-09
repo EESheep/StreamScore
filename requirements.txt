@@ -12,3 +12,5 @@ tqdm
 fastapi
 uvicorn[standard]
 jinja2
+openai
+dashscope

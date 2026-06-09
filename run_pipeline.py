@@ -72,7 +72,13 @@ def main():
     # ==================== 3. ASR 转写 ====================
     logger.info("--- Stage 3: ASR Transcription ---")
     transcript_path = os.path.join(output_dir, "transcript.jsonl")
-    transcript = run_asr(vocals_path, host_segments_path, transcript_path, config)
+    asr_provider = config.get("asr_provider", "faster-whisper")
+    if asr_provider == "aliyun":
+        from modules.asr_aliyun import run_asr_aliyun
+        # 阿里 Paraformer 用原始音频，避免 Demucs 伪影干扰
+        transcript = run_asr_aliyun(audio_path, host_segments_path, transcript_path, config)
+    else:
+        transcript = run_asr(vocals_path, host_segments_path, transcript_path, config)
     logger.info("Transcribed %d segments.", len(transcript))
 
     # ==================== 4. LLM 初始化 ====================

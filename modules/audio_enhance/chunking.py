@@ -43,7 +43,13 @@ def split_audio(audio_path, output_dir, chunk_duration=600, overlap=30, sr=16000
 def concat_vocals_with_crossfade(vocals_chunk_paths, chunk_duration=600, overlap=30,
                                   crossfade_duration=5, sr=16000):
     """将所有块的 vocals 用 crossfade 拼接为完整波形。返回 numpy array。"""
-    arrays = [sf.read(path, dtype="float32")[0] for path in vocals_chunk_paths]
+    raw_arrays = [sf.read(path, dtype="float32")[0] for path in vocals_chunk_paths]
+    # 统一转为单声道：Demucs 输出可能混有立体声/单声道
+    arrays = []
+    for arr in raw_arrays:
+        if arr.ndim == 2 and arr.shape[1] > 1:
+            arr = arr.mean(axis=1)  # stereo → mono
+        arrays.append(arr)
 
     # 第一块：只取非重叠部分
     result = arrays[0][:chunk_duration * sr]

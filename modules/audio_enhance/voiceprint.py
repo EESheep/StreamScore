@@ -12,7 +12,14 @@ def extract_embedding(spkrec, audio_path, start, end):
     audio = load_audio_segment(audio_path, start, end)
     if audio is None:
         return None
-    emb = spkrec.encode_waveform(audio)
+    # SpeechBrain 0.5.16: encode_batch, 1.0+: encode_waveform
+    if hasattr(spkrec, "encode_waveform"):
+        emb = spkrec.encode_waveform(audio)
+    else:
+        emb = spkrec.encode_batch(audio)
+    # 确保输出形状为 (1, 192): encode_batch 可能返回 (1, 1, 192)
+    while emb.dim() > 2:
+        emb = emb.squeeze(1)  # squeeze middle dims
     return emb
 
 

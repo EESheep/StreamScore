@@ -17,7 +17,7 @@ def separate_vocals(audio_path, output_dir, device="cuda"):
     logger.info("Running Demucs: %s", " ".join(cmd))
     subprocess.run(cmd, check=True)
     base = os.path.splitext(os.path.basename(audio_path))[0]
-    vocals_path = os.path.join(output_dir, "htdemucs_ft", base, "vocals.wav")
+    vocals_path = os.path.join(output_dir, "htdemucs", base, "vocals.wav")
     if not os.path.exists(vocals_path):
         raise FileNotFoundError(f"Demucs output not found: {vocals_path}")
     logger.info("Demucs output: %s", vocals_path)

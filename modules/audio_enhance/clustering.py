@@ -15,9 +15,14 @@ def cluster_speakers(all_embeddings, threshold=0.75):
     clusters = []  # list of {"label": str, "members": [], "embeddings": []}
 
     for spk_label, emb, chunk_id in all_embeddings:
+        # Ensure 2D: (1, embedding_dim)
+        if emb.dim() == 1:
+            emb = emb.unsqueeze(0)
         matched = False
         for cluster in clusters:
             center = _compute_center(cluster["embeddings"])
+            if center.dim() == 1:
+                center = center.unsqueeze(0)
             sim = F.cosine_similarity(emb, center, dim=1).item()
             if sim > threshold:
                 cluster["members"].append({"speaker_label": spk_label, "chunk_id": chunk_id})

@@ -7,13 +7,19 @@ logger = logging.getLogger(__name__)
 
 
 def transcribe_full_audio(audio_path, model_size="large-v3", device="cuda",
-                          compute_type="int8", beam_size=5):
+                          compute_type="int8", beam_size=5, language=None):
     """转写整段音频，返回词级时间戳列表 [{word, start, end, probability}]."""
     from faster_whisper import WhisperModel
 
+    # faster-whisper 1.x 只接受 "cuda" 不接受 "cuda:0"
+    if ":" in device:
+        device = device.split(":")[0]
     model = WhisperModel(model_size, device=device, compute_type=compute_type)
-    logger.info("Transcribing: %s (model=%s, compute=%s)", audio_path, model_size, compute_type)
-    segments, info = model.transcribe(audio_path, beam_size=beam_size, word_timestamps=True)
+    logger.info("Transcribing: %s (model=%s, compute=%s, language=%s)",
+                audio_path, model_size, compute_type, language or "auto")
+    segments, info = model.transcribe(
+        audio_path, beam_size=beam_size, word_timestamps=True, language=language
+    )
     logger.info("Detected language: %s (%.2f)", info.language, info.language_probability)
 
     words = []
@@ -63,7 +69,34 @@ def filter_host_transcript(words, host_segments):
             "confidence": round(avg_prob, 4),
         })
 
+    # 去重：相邻段文本相同或完全包含时合并
+    transcript = _dedup_transcript(transcript)
     logger.info("Filtered to %d transcript segments", len(transcript))
+    return transcript
+
+
+def _dedup_transcript(transcript):
+    """合并相邻的重复/包含文本段。"""
+    if len(transcript) <= 1:
+        return transcript
+
+    merged = [transcript[0]]
+    for cur in transcript[1:]:
+        prev = merged[-1]
+        prev_text = prev["text"]
+        cur_text = cur["text"]
+        # 文本相同 或 前一段包含当前段 或 当前段包含前一段
+        if (cur_text == prev_text
+                or cur_text in prev_text
+                or prev_text in cur_text):
+            # 合并：取最长时间区间和最长文本
+            prev["start"] = min(prev["start"], cur["start"])
+            prev["end"] = max(prev["end"], cur["end"])
+            if len(cur_text) > len(prev_text):
+                prev["text"] = cur_text
+        else:
+            merged.append(cur)
+    return merged
     return transcript
 
 
@@ -78,6 +111,7 @@ def run_asr(audio_path, segments_path, output_path, config):
         model_size=cfg.get("model_size", "large-v3"),
         device=gpu.get("device", "cuda"),
         compute_type=cfg.get("compute_type", "int8"),
+        language=cfg.get("language"),
     )
     transcript = filter_host_transcript(words, host_segments)
     write_jsonl(output_path, transcript)

@@ -127,9 +127,11 @@ def _run_enrollment(room_id):
     try:
         state = _enroll_state[room_id]
 
-        # 这里需要一个 audio_full.wav 路径。简化：假设固定路径
-        # 实际使用时前端应提供路径参数
-        audio_path = f"data/recordings/{room_id}/latest/audio_full.wav"
+        # 优先使用环境变量 ENROLL_AUDIO_PATH，否则回退到默认路径
+        audio_path = os.environ.get(
+            "ENROLL_AUDIO_PATH",
+            f"data/recordings/{room_id}/latest/audio_full.wav"
+        )
         if not os.path.exists(audio_path):
             raise FileNotFoundError(f"Audio not found: {audio_path}")
 
@@ -145,7 +147,7 @@ def _run_enrollment(room_id):
         cmd = ["demucs", "--two-stems", "vocals", "--device", "cuda", "-o", sep_dir, audio_path]
         subprocess.run(cmd, check=True)
         base = os.path.splitext(os.path.basename(audio_path))[0]
-        vocals_path = os.path.join(sep_dir, "htdemucs_ft", base, "vocals.wav")
+        vocals_path = os.path.join(sep_dir, "htdemucs", base, "vocals.wav")
 
         # VAD
         logger.info("[Enroll %s] Running VAD...", room_id)
