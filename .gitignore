@@ -1,0 +1,9 @@
+__pycache__/
+.vscode/
+pretrained_models/
+data/
+batch_results.json
+config_batch.yaml
+batch_run.py
+config.yaml
+*.mp4
