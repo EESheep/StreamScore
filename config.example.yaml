@@ -72,6 +72,9 @@ clip:
   max_duration: 600
   crf: 23
   audio_bitrate: "128k"
+  # 成品合成参数
+  hook_duration: 4.0    # hook 片段时间长度（秒）
+  hook_before: 1.0      # hook 时间点向前预留（秒）
 
 # ==================== 按主播覆写（可选） ====================
 room_overrides:

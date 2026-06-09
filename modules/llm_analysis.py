@@ -32,13 +32,16 @@ def segment_all(transcript, deepseek_client, model="deepseek-v4-flash"):
 
 
 def fill_text(segments, transcript):
-    """将原始 transcript 文本按整段包含填充到主题段。可空则标记。"""
+    """将原始 transcript 文本按整段包含填充到主题段，保留逐句时间戳。可空则标记。"""
     for seg in segments:
         seg_words = [
-            t["text"] for t in transcript
+            t for t in transcript
             if t["start"] >= seg.get("start", 0) and t["end"] <= seg.get("end", 0)
         ]
-        seg["text"] = " ".join(seg_words).strip()
+        seg["text"] = " ".join(t["text"] for t in seg_words).strip()
+        seg["transcript_entries"] = [
+            {"start": t["start"], "text": t["text"]} for t in seg_words
+        ]
         if not seg["text"]:
             seg["text"] = "（该时段主播未发言，可能存在过场/背景音乐/沉默）"
     return segments
@@ -53,6 +56,7 @@ def attach_danmaku(segments, danmaku_file, buffer_seconds=5, sample_top=10):
             seg["danmaku_count"] = 0
             seg["danmaku_density"] = 0
             seg["danmaku_peak"] = 0
+            seg["danmaku_peak_time"] = None
         return segments
 
     for seg in segments:
@@ -72,12 +76,13 @@ def attach_danmaku(segments, danmaku_file, buffer_seconds=5, sample_top=10):
         density = round(len(seg_danmakus) / duration, 2)
 
         # 峰值 (每秒弹幕数，取最密集的 1 秒)
-        peak = _compute_danmaku_peak(seg_danmakus, start, end)
+        peak, peak_time = _compute_danmaku_peak(seg_danmakus, start, end)
 
         seg["danmaku_sample"] = top_texts
         seg["danmaku_count"] = len(seg_danmakus)
         seg["danmaku_density"] = density
         seg["danmaku_peak"] = peak
+        seg["danmaku_peak_time"] = peak_time
 
     return segments
 
@@ -117,7 +122,7 @@ def score_segment(segment, deepseek_client, model="deepseek-v4-flash", max_retri
 
 
 def generate_clip_suggestions(high_scored_segments, deepseek_client, model="deepseek-v4-flash"):
-    """生成剪辑建议。输入精简为摘要级别数据。"""
+    """生成剪辑建议+标注。包含 hook 候选、删除建议、保留核心。"""
     clips_input = []
     for seg in high_scored_segments:
         clips_input.append({
@@ -125,10 +130,14 @@ def generate_clip_suggestions(high_scored_segments, deepseek_client, model="deep
             "end": seg.get("end"),
             "title": seg.get("title"),
             "summary": seg.get("summary", ""),
-            "text": seg.get("text", ""),
+            "transcript": seg.get("transcript_entries", []),
             "danmaku_sample": seg.get("danmaku_sample", []),
             "danmaku_count": seg.get("danmaku_count", 0),
+            "danmaku_density": seg.get("danmaku_density", 0),
+            "danmaku_peak": seg.get("danmaku_peak", 0),
+            "danmaku_peak_time": seg.get("danmaku_peak_time"),
             "overall": seg.get("overall", 0),
+            "scores": seg.get("scores", {}),
         })
 
     prompt = render_prompt("clip_suggest.txt", clips_json=json.dumps(clips_input, ensure_ascii=False))
@@ -175,10 +184,9 @@ def _validate_scores(scores):
 
 
 def _compute_danmaku_peak(danmakus, seg_start, seg_end):
-    """计算弹幕峰值（每秒弹幕数，1 秒窗口滑动）。"""
+    """计算弹幕峰值和峰值时间。返回 (peak_count, peak_time)。"""
     if not danmakus:
-        return 0
-    # 按 1 秒桶聚合
+        return 0, None
     duration = max(seg_end - seg_start, 1)
     bucket_count = int(duration) + 1
     buckets = [0] * bucket_count
@@ -186,4 +194,7 @@ def _compute_danmaku_peak(danmakus, seg_start, seg_end):
         idx = int(d["ts"] - seg_start)
         if 0 <= idx < bucket_count:
             buckets[idx] += 1
-    return max(buckets) if buckets else 0
+    peak = max(buckets) if buckets else 0
+    peak_idx = buckets.index(peak)
+    peak_time = round(seg_start + peak_idx + 0.5, 1) if peak > 0 else None
+    return peak, peak_time

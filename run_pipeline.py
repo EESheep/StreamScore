@@ -19,6 +19,7 @@ from modules.llm_analysis import (
 )
 from modules.clip_generator import (
     validate_clip_bounds, generate_ffmpeg_commands, execute_clips,
+    detect_silence_gaps, generate_pr_markers_csv, compose_hook_clips,
 )
 
 logger = logging.getLogger(__name__)
@@ -135,6 +136,13 @@ def main():
 
     clips = generate_clip_suggestions(high_scored, deepseek_client, model)
 
+    # VAD 静音检测 (用于 CSV 标记)
+    silence_deletes, silence_transitions = detect_silence_gaps(
+        vocals_path,
+        min_delete_silence=2.0,
+        min_transition_silence=4.0,
+    )
+
     # 校验
     from modules.audio_enhance.utils import get_audio_duration
     video_duration = get_audio_duration(audio_path)
@@ -148,6 +156,20 @@ def main():
     highlights_path = os.path.join(output_dir, "highlights.jsonl")
     write_jsonl(highlights_path, clips)
 
+    import json as _json
+    silence_path = os.path.join(output_dir, "silence.json")
+    with open(silence_path, "w", encoding="utf-8") as _f:
+        _json.dump({
+            "delete_suggestions": silence_deletes,
+            "transition_points": silence_transitions,
+        }, _f, ensure_ascii=False, indent=2)
+    logger.info("Silence analysis saved: %d delete + %d transition",
+                len(silence_deletes), len(silence_transitions))
+
+    # 生成 PR CSV 标记
+    silence_data = {"delete_suggestions": silence_deletes, "transition_points": silence_transitions}
+    generate_pr_markers_csv(clips, segments, silence_data, output_dir)
+
     # 生成并执行剪辑命令
     ffmpeg_cmds = generate_ffmpeg_commands(
         clips, flv_path, output_dir,
@@ -158,6 +180,15 @@ def main():
     if not args.skip_clip:
         ok_cmds = [cmd for cmd in ffmpeg_cmds if cmd is not None]
         execute_clips(ok_cmds)
+
+        # 生成带 hook + 去水分的成品
+        compose_hook_clips(
+            clips, segments, silence_data, flv_path, output_dir,
+            hook_duration=clip_cfg.get("hook_duration", 4.0),
+            hook_before=clip_cfg.get("hook_before", 1.0),
+            crf=clip_cfg.get("crf", 23),
+            audio_bitrate=clip_cfg.get("audio_bitrate", "128k"),
+        )
     else:
         logger.info("Clip execution skipped (--skip-clip).")
 

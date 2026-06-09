@@ -1,13 +1,59 @@
-为以下高分直播片段生成短视频剪辑建议。
-每个片段提供：标题（吸引眼球，20字内）、简介（50字内）、推荐标签（3-5个）。
-输出 JSON 数组，每个元素包含：
-- "start": 原始开始时间（秒）
-- "end": 原始结束时间（秒）
-- "title": 短视频标题
-- "intro": 简介
-- "tags": ["标签1", "标签2", "标签3"]
+为以下高分直播片段生成短视频剪辑建议+标注。
 
-只输出 JSON 数组，不要包含任何其他文字。
+每个片段需提供：
+
+【基础信息】
+- "start"/"end": 原始起止时间（秒）
+- "title": 短视频标题（吸引眼球，≤20字）
+- "intro": 简介（≤50字）
+- "tags": 3-5个推荐标签
+
+【Hook 候选】（用于视频开头抓人，最多选2个）
+- "hook_candidates": 数组，每项包含：
+  - "type": "highlight_sentence" 或 "turning_point"
+  - "time": 该句子在片段中的绝对时间（秒），从 transcript 中对应句子的 start 取值
+  - "text": 原文句子
+  - "reason": 为什么适合做 hook（≤15字）
+  选择标准：
+  - highlight_sentence: transcript 中信息最爆、情绪最高、或最有趣的一句话
+  - turning_point: 叙事转折句（"结果他突然说""没想到下一秒"），制造悬念
+
+【删除建议】（标识可删除的水分段落，保留口癖和语气词不动）
+- "cut_suggestions": 数组，每项包含：
+  - "type": "off_topic" 或 "useless_interaction"
+  - "start": 建议删除的开始时间（秒）
+  - "end": 建议删除的结束时间（秒）
+  - "reason": 删除理由（≤20字）
+  标记标准：
+  - off_topic: 话题跑偏、偏离主线主题的支线闲谈
+  - useless_interaction: 连续读弹幕无实质评论、反复感谢礼物等无效内容
+  注意：主播的口癖、语气词、重复表达属于个人风格，不标删除。
+
+【保留核心】（绝对不能删的段落）
+- "keep_core": 数组，每项包含 "start"/"end"/"reason"（≤15字）。只标记该片段最核心的1-2段。
+
+输出 JSON 格式（只输出 JSON，不要任何其他文字）：
+{
+  "clips": [
+    {
+      "start": 123.0,
+      "end": 234.0,
+      "title": "...",
+      "intro": "...",
+      "tags": ["tag1", "tag2"],
+      "hook_candidates": [
+        {"type": "highlight_sentence", "time": 150.5, "text": "原句", "reason": "情绪爆点"},
+        {"type": "turning_point", "time": 178.0, "text": "原句", "reason": "叙事转折"}
+      ],
+      "cut_suggestions": [
+        {"type": "off_topic", "start": 140.0, "end": 155.0, "reason": "聊到晚饭跑题"}
+      ],
+      "keep_core": [
+        {"start": 160.0, "end": 200.0, "reason": "核心论点输出"}
+      ]
+    }
+  ]
+}
 
 片段数据：
 {{ clips_json }}
