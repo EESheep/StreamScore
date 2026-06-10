@@ -170,18 +170,8 @@ def main():
     silence_data = {"delete_suggestions": silence_deletes, "transition_points": silence_transitions}
     generate_pr_markers_csv(clips, segments, silence_data, output_dir)
 
-    # 生成并执行剪辑命令
-    ffmpeg_cmds = generate_ffmpeg_commands(
-        clips, flv_path, output_dir,
-        crf=clip_cfg.get("crf", 23),
-        audio_bitrate=clip_cfg.get("audio_bitrate", "128k"),
-    )
-
+    # 单轮生成剪辑：hook 开头 + 去水分 → clip_000.mp4
     if not args.skip_clip:
-        ok_cmds = [cmd for cmd in ffmpeg_cmds if cmd is not None]
-        execute_clips(ok_cmds)
-
-        # 生成带 hook + 去水分的成品
         compose_hook_clips(
             clips, segments, silence_data, flv_path, output_dir,
             hook_duration=clip_cfg.get("hook_duration", 4.0),
@@ -197,7 +187,9 @@ def main():
     logger.info("=== Pipeline Complete ===")
     logger.info("Output: %s", output_dir)
     logger.info("Files: audio_full.wav, vocals.wav, danmaku.jsonl, "
-                "host_speech_segments.jsonl, transcript.jsonl, segments.jsonl, highlights.jsonl")
+                "host_speech_segments.jsonl, transcript.jsonl, "
+                "segments.jsonl, highlights.jsonl, silence.json, "
+                "clip_*_markers.csv, clip_*.mp4")
 
 
 # ============================================================
